@@ -1,0 +1,42 @@
+name: Nix checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  x86_64-linux:
+    # Native runner for the currently validated platform; no cross-build claim.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+        with:
+          enable_kvm: false
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            sandbox = true
+            sandbox-fallback = false
+            max-jobs = 2
+            cores = 2
+      - name: Build with committed lockfile
+        run: nix build -L --no-write-lock-file
+      - name: Run all checks with committed lockfile
+        # Includes both Git/cache versions, race detection, bounded fuzzing,
+        # unit tests, vet, executable build, Go/Nix formatting, and workflow lint.
+        run: nix flake check -L --no-write-lock-file
+      - name: Verify dependency pins were not rewritten
+        run: nix develop --no-write-lock-file -c git diff --exit-code -- flake.lock go.mod go.sum
